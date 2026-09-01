@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Fireboy and Watergirl - Forest Temple (หลายด่าน)</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: linear-gradient(#1a2e1a, #0d1a0d);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    color: #eaffea;
+    padding: 20px;
+  }
+  h1 { margin: 6px 0; text-shadow: 2px 2px 4px #000; }
+  #gameCanvas {
+    background: #14210f;
+    border: 6px solid #4b3621;
+    border-radius: 8px;
+    box-shadow: 0 0 25px rgba(0,0,0,0.6);
+  }
+  .info {
+    display: flex;
+    gap: 40px;
+    margin: 10px 0;
+    font-size: 14px;
+  }
+  .fire-info { color: #ffe642; }
+  .water-info { color: #7c4ff7; }
+  .hud {
+    display: flex;
+    gap: 30px;
+    margin: 6px 0 2px 0;
+    font-size: 17px;
+    font-weight: bold;
+  }
+  .hud span.value { color: #ffd54f; text-shadow: 1px 1px 3px #000; }
+  #message {
+    margin-top: 10px;
+    font-size: 20px;
+    font-weight: bold;
+    min-height: 28px;
+    text-shadow: 1px 1px 3px #000;
+  }
+  #restartBtn {
+    margin-top: 8px;
+    padding: 8px 18px;
+    font-size: 15px;
+    border-radius: 6px;
+    border: none;
+    background: #6b8e23;
+    color: white;
+    cursor: pointer;
+    display: none;
+  }
+  #restartBtn:hover { background: #7fa32b; }
+</style>
+</head>
+<body>
+  <h1>🔥 Fireboy &amp; Watergirl 💧 — Forest Temple</h1>
+  <div class="info">
+    <span class="fire-info">🔥 Fireboy: ลูกศร ← → เดิน, ↑ กระโดด</span>
+    <span class="water-info">💧 Watergirl: A D เดิน, W กระโดด</span>
+  </div>
+  <div class="hud">
+    <div>ด่าน: <span class="value" id="levelDisplay">1</span> / <span id="levelTotal">20</span></div>
+    <div>คะแนน: <span class="value" id="scoreDisplay">0</span></div>
+    <div>เพชร: <span class="value" id="gemDisplay">0</span>/<span id="gemTotalDisplay">0</span></div>
+    <div>ความยาก: <span class="value" id="difficultyDisplay">x1.0</span></div>
+  </div>
+  <canvas id="gameCanvas" width="800" height="480"></canvas>
+  <div id="message"></div>
+  <button id="restartBtn" onclick="resetAll()">เริ่มใหม่ทั้งหมด</button>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const messageEl = document.getElementById('message');
+const restartBtn = document.getElementById('restartBtn');
+const levelDisplay = document.getElementById('levelDisplay');
+const levelTotalEl = document.getElementById('levelTotal');
+const scoreDisplay = document.getElementById('scoreDisplay');
+const gemDisplay = document.getElementById('gemDisplay');
+const gemTotalDisplay = document.getElementById('gemTotalDisplay');
+const difficultyDisplay = document.getElementById('difficultyDisplay');
+
+// ---------- Sound (Web Audio API) ----------
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function playTone(freq, duration, type='square', startGain=0.15, delay=0) {
+  try {
+    const ac = getAudioCtx();
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ac.currentTime + delay);
+    gain.gain.setValueAtTime(startGain, ac.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + delay + duration);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(ac.currentTime + delay);
+    osc.stop(ac.currentTime + delay + duration);
+  } catch (e) { /* ignore */ }
+}
+const sfx = {
+  jump: () => playTone(520, 0.12, 'square', 0.12),
+  gem:  () => { playTone(880, 0.08, 'triangle', 0.15); playTone(1320, 0.1, 'triangle', 0.12, 0.06); },
+  death: () => { playTone(220, 0.25, 'sawtooth', 0.18); playTone(110, 0.35, 'sawtooth', 0.15, 0.1); },
+  win:  () => { [523,659,784,1047].forEach((f,i) => playTone(f, 0.18, 'triangle', 0.15, i*0.12)); },
+  levelClear: () => { [660,880,1100].forEach((f,i) => playTone(f, 0.15, 'square', 0.14, i*0.09)); },
+  step: () => playTone(150, 0.04, 'square', 0.03),
+};
+function unlockAudioOnce() {
+  getAudioCtx();
+  document.removeEventListener('keydown', unlockAudioOnce);
+  document.removeEventListener('click', unlockAudioOnce);
+}
+document.addEventListener('keydown', unlockAudioOnce);
+document.addEventListener('click', unlockAudioOnce);
+
+const GRAVITY = 0.55;
+const FRICTION = 0.82;
+const MOVE_SPEED = 0.9;
+const JUMP_FORCE = -11.5;
+
+// ---------- Level generator: สร้าง 20 ด่านอัตโนมัติ ความยากเพิ่มตามหมายเลขด่าน ----------
+// hazard: {x,y,w,h,type:'lava'|'water'|'goo', moving?:{axis:'x'|'y', range, speed, base}}
+function seededRandomFn(seed) {
+  return function() {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const TOTAL_LEVELS = 20;
+
+function generateLevel(levelNum) {
+  const rand = seededRandomFn(levelNum * 7919 + 13);
+  const platforms = [
+    {x:0, y:450, w:800, h:30},{x:0, y:0, w:20, h:480},{x:780, y:0, w:20, h:480},{x:0, y:0, w:800, h:20},
+  ];
+
+  // จำนวนแถวแพลตฟอร์มกลาง เพิ่มขึ้นตามด่าน (4 -> 10)
+  const rows = Math.min(10, 4 + Math.floor(levelNum / 3));
+  const platW = Math.max(90, 150 - levelNum * 3);
+  const platH = Math.max(12, 20 - Math.floor(levelNum / 5));
+  const anchorPattern = [140, 320, 520, 320]; // ระยะห่างแนวนอนต่อแถว ~180-200px ให้กระโดดถึงเสมอ
+  const topY = 90, bottomY = 400;
+  const rowSpacing = rows > 1 ? (bottomY - topY) / rows : 0;
+
+  const midPlatforms = [];
+  for (let i = 0; i < rows; i++) {
+    const y = bottomY - i * rowSpacing;
+    const baseX = anchorPattern[i % anchorPattern.length];
+    const jitter = (rand() - 0.5) * 30;
+    const x = Math.max(30, Math.min(800 - 30 - platW, baseX + jitter));
+    midPlatforms.push({x, y, w: platW, h: platH});
+  }
+  platforms.push(...midPlatforms);
+
+  // แถวบนสุด: แพลตฟอร์มประตูซ้าย-ขวา
+  const doorRowY = Math.max(60, topY - rowSpacing * 0.6);
+  const leftDoorPlat = {x: 70, y: doorRowY, w: platW + 20, h: platH};
+  const rightDoorPlat = {x: 800 - 70 - (platW + 20), y: doorRowY, w: platW + 20, h: platH};
+  platforms.push(leftDoorPlat, rightDoorPlat);
+
+  const fireDoor = {x: rightDoorPlat.x + rightDoorPlat.w/2 - 18, y: doorRowY - 40, w:36, h:40};
+  const waterDoor = {x: leftDoorPlat.x + leftDoorPlat.w/2 - 18, y: doorRowY - 40, w:36, h:40};
+
+  // อันตรายบนพื้น
+  const hazards = [];
+  const floorHazardCount = Math.min(8, 2 + Math.floor(levelNum / 2));
+  for (let i = 0; i < floorHazardCount; i++) {
+    const w = 40 + rand() * 30;
+    const x = 130 + rand() * (800 - 260 - w);
+    hazards.push({x, y: 430, w, h: 20, type: rand() < 0.5 ? 'lava' : 'water'});
+  }
+
+  // อันตรายที่ขยับได้ เพิ่มจำนวนและความเร็วตามด่าน
+  const movingCount = Math.min(6, Math.floor(levelNum / 3));
+  const speedBase = 0.7 + levelNum * 0.035;
+  for (let i = 0; i < movingCount; i++) {
+    const rowIdx = 1 + Math.floor(rand() * Math.max(1, rows - 2));
+    const rowPlat = midPlatforms[rowIdx] || midPlatforms[0];
+    const axis = rand() < 0.5 ? 'x' : 'y';
+    const type = levelNum > 10 && rand() < 0.4 ? (rand() < 0.5 ? 'lava' : 'water') : 'goo';
+    if (axis === 'x') {
+      hazards.push({
+        x: rowPlat.x, y: rowPlat.y - 60, w: 16, h: 90, type,
+        moving: {axis:'x', base: rowPlat.x, range: 60 + levelNum * 2, speed: speedBase, phase: rand()*6}
+      });
+    } else {
+      hazards.push({
+        x: rowPlat.x + rowPlat.w/2 - 8, y: 0, w: 16, h: 80, type,
+        moving: {axis:'y', base: 0, range: 50 + levelNum * 3, speed: speedBase * 1.1, phase: rand()*6}
+      });
+    }
+  }
+
+  // เพชร: วางบนแพลตฟอร์มกลางแต่ละแถว + แถวประตู
+  const gemsData = [];
+  midPlatforms.forEach((p) => {
+    gemsData.push({x: p.x + p.w*0.3, y: p.y - 20, type: rand() < 0.5 ? 'fire' : 'water'});
+    if (levelNum > 6 && rand() < 0.5) {
+      gemsData.push({x: p.x + p.w*0.7, y: p.y - 20, type: rand() < 0.5 ? 'fire' : 'water'});
+    }
+  });
+  gemsData.push({x: leftDoorPlat.x + 20, y: doorRowY - 20, type: 'water'});
+  gemsData.push({x: rightDoorPlat.x + rightDoorPlat.w - 20, y: doorRowY - 20, type: 'fire'});
+
+  return {
+    fireStart: {x:60, y:410}, waterStart: {x:720, y:410},
+    fireDoor, waterDoor, platforms, hazards, gemsData,
+  };
+}
+
+const LEVELS = Array.from({length: TOTAL_LEVELS}, (_, i) => generateLevel(i + 1));
+
+let currentLevelIndex = 0;
+let gems = [];
+let currentPlatforms = [], currentHazards = [], currentFireDoor, currentWaterDoor;
+
+let keys = {};
+let gameOver = false;
+let win = false;
+let score = 0;
+let gameTimeSec = 0;      // เวลารวมตั้งแต่เริ่มเกม (ไม่รีเซ็ตตอนขึ้นด่านใหม่) ใช้คำนวณความยาก
+let difficultyFactor = 1.0;
+
+class Player {
+  constructor(color, type) {
+    this.color = color;
+    this.type = type;
+    this.w = 26; this.h = 34;
+    this.x = 0; this.y = 0; this.vx = 0; this.vy = 0;
+    this.onGround = false;
+    this.alive = true;
+    this.atDoor = false;
+  }
+  place(pos) {
+    this.x = pos.x; this.y = pos.y;
+    this.vx = 0; this.vy = 0; this.alive = true; this.atDoor = false;
+  }
+  update(left, right, jump) {
+    if (!this.alive || gameOver) return;
+    if (left) this.vx -= MOVE_SPEED;
+    if (right) this.vx += MOVE_SPEED;
+    this.vx *= FRICTION;
+    if (Math.abs(this.vx) > 5) this.vx = 5 * Math.sign(this.vx);
+
+    if (jump && this.onGround) {
+      this.vy = JUMP_FORCE;
+      this.onGround = false;
+      sfx.jump();
+    }
+
+    this.vy += GRAVITY;
+    if (this.vy > 14) this.vy = 14;
+
+    this.x += this.vx;
+    this.collideAxis('x');
+    this.y += this.vy;
+    this.onGround = false;
+    this.collideAxis('y');
+
+    for (const hz of currentHazards) {
+      if (this.rectsOverlap(this, hz)) {
+        if (hz.type === 'goo') { this.die(); }
+        else if (hz.type === 'lava' && this.type !== 'fire') { this.die(); }
+        else if (hz.type === 'water' && this.type !== 'water') { this.die(); }
+      }
+    }
+
+    for (const g of gems) {
+      if (!g.collected && this.rectsOverlap(this, {x:g.x-10,y:g.y-10,w:20,h:20})) {
+        if (g.type === this.type) {
+          g.collected = true;
+          score += 10;
+          sfx.gem();
+          updateHud();
+        }
+      }
+    }
+
+    const door = this.type === 'fire' ? currentFireDoor : currentWaterDoor;
+    this.atDoor = this.rectsOverlap(this, door);
+
+    if (this.y > 500) this.die();
+  }
+  die() {
+    if (!this.alive) return;
+    this.alive = false;
+    gameOver = true;
+    win = false;
+    sfx.death();
+    showMessage((this.type === 'fire' ? '🔥 Fireboy' : '💧 Watergirl') + ' โดนอันตราย! กดเริ่มใหม่ด่านนี้', '#ff5252', true);
+  }
+  collideAxis(axis) {
+    for (const p of currentPlatforms) {
+      if (this.rectsOverlap(this, p)) {
+        if (axis === 'x') {
+          if (this.vx > 0) this.x = p.x - this.w;
+          else if (this.vx < 0) this.x = p.x + p.w;
+          this.vx = 0;
+        } else {
+          if (this.vy > 0) { this.y = p.y - this.h; this.onGround = true; }
+          else if (this.vy < 0) { this.y = p.y + p.h; }
+          this.vy = 0;
+        }
+      }
+    }
+  }
+  rectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+  draw() {
+    if (!this.alive) return;
+    ctx.save();
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.roundRect(this.x, this.y, this.w, this.h, 6);
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = 'white';
+    ctx.fillRect(this.x+5, this.y+8, 6, 6);
+    ctx.fillRect(this.x+15, this.y+8, 6, 6);
+    ctx.fillStyle = 'black';
+    ctx.fillRect(this.x+7, this.y+10, 3, 3);
+    ctx.fillRect(this.x+17, this.y+10, 3, 3);
+  }
+}
+
+let fireboy = new Player('#ff5722', 'fire');
+let watergirl = new Player('#29b6f6', 'water');
+let stepTimer = 0;
+
+function loadLevel(idx) {
+  const lvl = LEVELS[idx];
+  currentPlatforms = lvl.platforms;
+  currentFireDoor = lvl.fireDoor;
+  currentWaterDoor = lvl.waterDoor;
+  // สำเนา hazard และเก็บตำแหน่งฐานไว้สำหรับคำนวณการขยับ
+  currentHazards = lvl.hazards.map(h => ({...h, moving: h.moving ? {...h.moving} : null}));
+  gems = lvl.gemsData.map(g => ({...g, collected:false}));
+  fireboy.place(lvl.fireStart);
+  watergirl.place(lvl.waterStart);
+  gameOver = false;
+  win = false;
+  messageEl.textContent = '';
+  restartBtn.style.display = 'none';
+  levelDisplay.textContent = (idx+1);
+  levelTotalEl.textContent = LEVELS.length;
+  gemTotalDisplay.textContent = gems.length;
+  updateHud();
+}
+
+function resetAll() {
+  currentLevelIndex = 0;
+  score = 0;
+  gameTimeSec = 0;
+  difficultyFactor = 1.0;
+  loadLevel(0);
+}
+resetAll();
+
+function updateHud() {
+  scoreDisplay.textContent = score;
+  gemDisplay.textContent = gems.filter(g => g.collected).length;
+  difficultyDisplay.textContent = 'x' + difficultyFactor.toFixed(1);
+}
+
+function showMessage(text, color, showRestart) {
+  messageEl.textContent = text;
+  messageEl.style.color = color;
+  if (showRestart) restartBtn.style.display = 'inline-block';
+}
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  // กด Enter เพื่อไปด่านต่อไป/เริ่มด่านนี้ใหม่หลังจบเกม
+  if (e.code === 'Enter' && gameOver) {
+    if (win) {
+      advanceLevel();
+    } else {
+      loadLevel(currentLevelIndex);
+    }
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+function advanceLevel() {
+  if (currentLevelIndex < LEVELS.length - 1) {
+    currentLevelIndex++;
+    loadLevel(currentLevelIndex);
+  } else {
+    showMessage('🏆 จบเกมแล้ว! คะแนนรวม: ' + score + ' — กด "เริ่มใหม่ทั้งหมด" เพื่อเล่นอีกครั้ง', '#c6ff00', true);
+  }
+}
+
+function checkWin() {
+  if (gameOver) return;
+  if (fireboy.atDoor && watergirl.atDoor && fireboy.alive && watergirl.alive) {
+    gameOver = true;
+    win = true;
+    const allGems = gems.every(g => g.collected);
+    const levelBonus = 100 + (allGems ? 50 : 0);
+    score += levelBonus;
+    sfx.levelClear();
+    updateHud();
+    const isLast = currentLevelIndex === LEVELS.length - 1;
+    showMessage(
+      (isLast ? '🎉 ผ่านด่านสุดท้ายแล้ว! ' : '🎉 ผ่านด่าน ' + (currentLevelIndex+1) + '! ') +
+      '+' + levelBonus + ' แต้ม' + (allGems ? ' (เก็บเพชรครบ!)' : '') +
+      ' — กด Enter เพื่อไปต่อ',
+      '#c6ff00', true
+    );
+  }
+}
+
+// อัปเดตตำแหน่งอันตรายที่ขยับได้ — ยิ่งเวลาผ่านไปนาน ความเร็ว/ความยากยิ่งเพิ่ม
+function updateHazards(dt) {
+  for (const hz of currentHazards) {
+    if (!hz.moving) continue;
+    const m = hz.moving;
+    m.phase = (m.phase || 0) + dt * m.speed * difficultyFactor;
+    const offset = Math.sin(m.phase) * m.range * Math.min(difficultyFactor, 1.8) / 1.0;
+    if (m.axis === 'x') hz.x = m.base + offset;
+    else hz.y = m.base + Math.max(0, offset);
+  }
+}
+
+function drawBackground() {
+  ctx.fillStyle = '#14210f';
+  ctx.fillRect(0,0,canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  for (let i=0;i<canvas.width;i+=40) {
+    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,canvas.height); ctx.stroke();
+  }
+}
+
+function drawPlatforms() {
+  for (const p of currentPlatforms) {
+    ctx.fillStyle = '#5d4630';
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = '#7a6142';
+    ctx.fillRect(p.x, p.y, p.w, 4);
+  }
+}
+
+function drawHazards() {
+  for (const hz of currentHazards) {
+    if (hz.type === 'lava') {
+      const grad = ctx.createLinearGradient(hz.x, hz.y, hz.x, hz.y+hz.h);
+      grad.addColorStop(0, '#ff7043'); grad.addColorStop(1, '#bf360c');
+      ctx.fillStyle = grad;
+    } else if (hz.type === 'water') {
+      const grad = ctx.createLinearGradient(hz.x, hz.y, hz.x, hz.y+hz.h);
+      grad.addColorStop(0, '#4fc3f7'); grad.addColorStop(1, '#01579b');
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = '#66bb6a';
+    }
+    ctx.fillRect(hz.x, hz.y, hz.w, hz.h);
+  }
+}
+
+function drawGems() {
+  for (const g of gems) {
+    if (g.collected) continue;
+    ctx.save();
+    ctx.translate(g.x, g.y);
+    ctx.rotate(Math.PI/4);
+    ctx.fillStyle = g.type === 'fire' ? '#ff8a65' : '#81d4fa';
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 10;
+    ctx.fillRect(-7,-7,14,14);
+    ctx.restore();
+  }
+}
+
+function drawDoors() {
+  ctx.fillStyle = fireboy.atDoor ? '#ffab40' : '#8d6e63';
+  ctx.fillRect(currentFireDoor.x, currentFireDoor.y, currentFireDoor.w, currentFireDoor.h);
+  ctx.fillStyle = watergirl.atDoor ? '#4dd0e1' : '#8d6e63';
+  ctx.fillRect(currentWaterDoor.x, currentWaterDoor.y, currentWaterDoor.w, currentWaterDoor.h);
+  ctx.fillStyle = '#fff';
+  ctx.font = '10px Arial';
+  ctx.fillText('🔥', currentFireDoor.x+9, currentFireDoor.y+26);
+  ctx.fillText('💧', currentWaterDoor.x+9, currentWaterDoor.y+26);
+}
+
+let lastTime = performance.now();
+function gameLoop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05); // วินาที ต่อเฟรม (จำกัดไม่ให้กระโดดเวลา)
+  lastTime = now;
+
+  if (!gameOver) {
+    gameTimeSec += dt;
+    // ความยากเพิ่มขึ้น x0.1 ทุก 15 วินาทีที่เล่น สูงสุด x2.5
+    difficultyFactor = Math.min(1 + Math.floor(gameTimeSec / 15) * 0.1, 2.5);
+
+    updateHazards(dt);
+    fireboy.update(keys['ArrowLeft'], keys['ArrowRight'], keys['ArrowUp']);
+    watergirl.update(keys['KeyA'], keys['KeyD'], keys['KeyW']);
+    checkWin();
+    updateHud();
+
+    const anyMoving = (fireboy.onGround && Math.abs(fireboy.vx) > 1) || (watergirl.onGround && Math.abs(watergirl.vx) > 1);
+    if (anyMoving) {
+      stepTimer++;
+      if (stepTimer > 12) { sfx.step(); stepTimer = 0; }
+    } else {
+      stepTimer = 0;
+    }
+  }
+
+  drawBackground();
+  drawPlatforms();
+  drawHazards();
+  drawGems();
+  drawDoors();
+  fireboy.draw();
+  watergirl.draw();
+
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
