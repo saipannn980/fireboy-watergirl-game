@@ -151,7 +151,7 @@ function generateLevel(levelNum) {
   const rows = Math.min(15, 6 + Math.floor(levelNum / 5));
   const platW = Math.max(120, 150 - levelNum * 3);
   const platH = Math.max(12, 20 - Math.floor(levelNum / 20));
-  const anchorPattern = [160, 360, 550, 350]; // ระยะห่างแนวนอนต่อแถว ~180-200px ให้กระโดดถึงเสมอ
+  const anchorPattern = [140, 320, 520, 320]; // ระยะห่างแนวนอนต่อแถว ~180-200px ให้กระโดดถึงเสมอ
   const topY = 90, bottomY = 400;
   const rowSpacing = rows > 1 ? (bottomY - topY) / rows : 0;
 
