@@ -148,9 +148,9 @@ function generateLevel(levelNum) {
   ];
 
   // จำนวนแถวแพลตฟอร์มกลาง เพิ่มขึ้นตามด่าน (4 -> 10)
-  const rows = Math.min(10, 4 + Math.floor(levelNum / 3));
-  const platW = Math.max(90, 150 - levelNum * 3);
-  const platH = Math.max(12, 20 - Math.floor(levelNum / 5));
+  const rows = Math.min(15, 6 + Math.floor(levelNum / 5));
+  const platW = Math.max(120, 150 - levelNum * 3);
+  const platH = Math.max(12, 20 - Math.floor(levelNum / 20));
   const anchorPattern = [140, 320, 520, 320]; // ระยะห่างแนวนอนต่อแถว ~180-200px ให้กระโดดถึงเสมอ
   const topY = 90, bottomY = 400;
   const rowSpacing = rows > 1 ? (bottomY - topY) / rows : 0;
@@ -166,7 +166,7 @@ function generateLevel(levelNum) {
   platforms.push(...midPlatforms);
 
   // แถวบนสุด: แพลตฟอร์มประตูซ้าย-ขวา
-  const doorRowY = Math.max(60, topY - rowSpacing * 0.6);
+  const doorRowY = Math.max(80, topY - rowSpacing * 0.6);
   const leftDoorPlat = {x: 70, y: doorRowY, w: platW + 20, h: platH};
   const rightDoorPlat = {x: 800 - 70 - (platW + 20), y: doorRowY, w: platW + 20, h: platH};
   platforms.push(leftDoorPlat, rightDoorPlat);
@@ -532,9 +532,14 @@ function gameLoop(now) {
   fireboy.draw();
   watergirl.draw();
 
+
+  const rowSpacing = rows > 1 ? (bottomY - topY) / (rows - 1) : 0;
+// ...
+const topPlatformY = bottomY - (rows - 1) * rowSpacing; // = topY พอดีเสมอ
+const doorRowY = Math.max(60, topPlatformY - rowSpacing * 0.6);
   requestAnimationFrame(gameLoop);
 }
-requestAnimationFrame(gameLoop);
+requestAnimationFrame(gameLoop);  
 </script>
 </body>
 </html>
