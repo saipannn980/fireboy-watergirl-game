@@ -1,6 +1,4 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
+<!DOCTYPE <head>
 <meta charset="UTF-8">
 <title>Fireboy and Watergirl - Forest Temple </title>
 <style>
@@ -182,14 +180,22 @@ function generateLevel(levelNum) {
   platforms.push(bridgePlat);
   midPlatforms.push(bridgePlat);
 
-  // อันตรายบนพื้น
+  // อันตรายบนพื้น: วางแบบไม่ให้ซ้อนทับกัน และเว้นระยะวิ่งขึ้นให้พอกระโดดข้ามได้เสมอ
   const hazards = [];
   const floorHazardCount = Math.min(8, 2 + Math.floor(levelNum / 2));
-  for (let i = 0; i < floorHazardCount; i++) {
-    const w = 40 + rand() * 30;
-    const x = 130 + rand() * (800 - 260 - w);
+  const MAX_JUMPABLE_GAP = 150; // ระยะกระโดดข้ามได้อย่างปลอดภัย (คำนวณจากแรงกระโดด/แรงโน้มถ่วงจริงของเกม)
+  const MIN_RUNWAY = 90; // ระยะพื้นเรียบขั้นต่ำก่อน/หลังกับดัก สำหรับวิ่งเข้าจังหวะกระโดด
+  let floorCursor = 130;
+  const floorLimit = 800 - 130;
+  for (let i = 0; i < floorHazardCount && floorCursor < floorLimit - 40; i++) {
+    const remaining = floorLimit - floorCursor;
+    const w = Math.min(40 + rand() * 30, MAX_JUMPABLE_GAP, Math.max(20, remaining - MIN_RUNWAY));
+    if (w < 20) break;
+    const x = floorCursor + rand() * 10;
     hazards.push({x, y: 430, w, h: 20, type: rand() < 0.5 ? 'lava' : 'water'});
+    floorCursor = x + w + MIN_RUNWAY + rand() * 40;
   }
+
 
   // อันตรายที่ขยับได้ เพิ่มจำนวนและความเร็วตามด่าน
   const movingCount = Math.min(6, Math.floor(levelNum / 3));
@@ -253,23 +259,4 @@ class Player {
     this.atDoor = false;
   }
   place(pos) {
-    this.x = pos.x; this.y = pos.y;
-    this.vx = 0; this.vy = 0; this.alive = true; this.atDoor = false;
-  }
-  update(left, right, jump) {
-    if (!this.alive || gameOver) return;
-    if (left) this.vx -= MOVE_SPEED;
-    if (right) this.vx += MOVE_SPEED;
-    this.vx *= FRICTION;
-    if (Math.abs(this.vx) > 5) this.vx = 5 * Math.sign(this.vx);
-
-    if (jump && this.onGround) {
-      this.vy = JUMP_FORCE;
-      this.onGround = false;
-      sfx.jump();
-    }
-
-    this.vy += GRAVITY;
-    if (this.vy > 14) this.vy = 14;
-
-    this.x += this
+    this.x = pos.x; this.
